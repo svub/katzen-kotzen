@@ -23,6 +23,8 @@
         :level="level"
         :left="catStates[idx].left"
         :top="catStates[idx].top"
+        :catState="catStatus[idx]"
+        :size="catSize"
       />
     </div>
     <div v-if="vomitedCats.length === cats.length" class="levelup">
@@ -32,26 +34,36 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch } from 'vue';
+import { ref, reactive, onMounted, watch, computed } from 'vue';
 import Cat from './components/Cat.vue';
 import game from './gameLogic.js';
-const { level, score, highscore, cats, vomitedCats, resetSignal, handleCatVomit, resetGame } = game.setup();
+const { level, score, highscore, cats, vomitedCats, resetSignal, handleCatVomit: originalHandleCatVomit, resetGame } = game.setup();
 
+const baseCatSize = 120;
+const minCatSize = 50;
+const catSize = computed(() => {
+  // Katzen werden pro Level kleiner, aber mindestens 50px
+  return Math.max(baseCatSize - (level.value - 1) * 12, minCatSize);
+});
 const areaWidth = 600;
 const areaHeight = 350;
-const catSize = 120;
 
 // Position und Geschwindigkeit für jede Katze
 const catStates = reactive([]);
+// Status für jede Katze: 'normal', 'sick', 'vomit'
+const catStatus = ref([]);
+
 function initCatStates() {
   catStates.length = 0;
+  catStatus.value = [];
   for (let i = 0; i < cats.value.length; i++) {
     catStates.push({
-      left: Math.random() * (areaWidth - catSize),
-      top: Math.random() * (areaHeight - catSize),
+      left: Math.random() * (areaWidth - catSize.value),
+      top: Math.random() * (areaHeight - catSize.value),
       vx: (Math.random() - 0.5) * 2.5,
       vy: (Math.random() - 0.5) * 2.5,
     });
+    catStatus.value.push('normal');
   }
 }
 
@@ -61,31 +73,44 @@ watch(cats, initCatStates);
 
 function updatePositions() {
   for (let i = 0; i < catStates.length; i++) {
+    if (catStatus.value[i] === 'vomit') continue; // Umgefallene Katzen bewegen sich nicht mehr
     let cat = catStates[i];
     cat.left += cat.vx;
     cat.top += cat.vy;
     if (cat.left < 0) { cat.left = 0; cat.vx *= -1; }
-    if (cat.left > areaWidth - catSize) { cat.left = areaWidth - catSize; cat.vx *= -1; }
+    if (cat.left > areaWidth - catSize.value) { cat.left = areaWidth - catSize.value; cat.vx *= -1; }
     if (cat.top < 0) { cat.top = 0; cat.vy *= -1; }
-    if (cat.top > areaHeight - catSize) { cat.top = areaHeight - catSize; cat.vy *= -1; }
+    if (cat.top > areaHeight - catSize.value) { cat.top = areaHeight - catSize.value; cat.vy *= -1; }
   }
   for (let i = 0; i < catStates.length; i++) {
     for (let j = i + 1; j < catStates.length; j++) {
+      if (catStatus.value[i] === 'vomit' && catStatus.value[j] === 'vomit') continue;
       const a = catStates[i];
       const b = catStates[j];
       const dx = a.left - b.left;
       const dy = a.top - b.top;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < catSize * 0.8) {
-        [a.vx, b.vx] = [b.vx, a.vx];
-        [a.vy, b.vy] = [b.vy, a.vy];
-        const overlap = catSize * 0.8 - dist;
+      if (dist < catSize.value * 0.8) {
+        // Nur lebende Katzen stoßen sich ab, umgefallene bleiben liegen
+        if (catStatus.value[i] !== 'vomit') {
+          a.vx = -a.vx;
+          a.vy = -a.vy;
+        }
+        if (catStatus.value[j] !== 'vomit') {
+          b.vx = -b.vx;
+          b.vy = -b.vy;
+        }
+        const overlap = catSize.value * 0.8 - dist;
         const nx = dx / (dist || 1);
         const ny = dy / (dist || 1);
-        a.left += nx * (overlap / 2);
-        a.top += ny * (overlap / 2);
-        b.left -= nx * (overlap / 2);
-        b.top -= ny * (overlap / 2);
+        if (catStatus.value[i] !== 'vomit') {
+          a.left += nx * (overlap / 2);
+          a.top += ny * (overlap / 2);
+        }
+        if (catStatus.value[j] !== 'vomit') {
+          b.left -= nx * (overlap / 2);
+          b.top -= ny * (overlap / 2);
+        }
       }
     }
   }
@@ -99,6 +124,13 @@ function animate() {
 onMounted(() => {
   animate();
 });
+
+// Wenn eine Katze kotzt, Status setzen
+function handleCatVomit(id) {
+  catStatus.value[id] = 'vomit';
+  originalHandleCatVomit(id);
+}
+const handleCatVomitOrig = originalHandleCatVomit;
 </script>
 
 <style scoped>
